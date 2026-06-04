@@ -1,0 +1,543 @@
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import type { AnalysisResult } from '../types';
+import Card from './ui/Card';
+import Button from './ui/Button';
+import ScoreGauge from './ScoreGauge';
+import PatternCard from './PatternCard';
+import FingerprintDisplay from './FingerprintDisplay';
+import PatternDistributionChart from './PatternDistributionChart';
+import HandlungsplanDisplay from './HandlungsplanDisplay';
+import { DownloadIcon, ExpandIcon, ShrinkIcon, InfoIcon, FileIcon } from './ui/Icons';
+import PrintPreviewModal from './PrintPreviewModal';
+import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts';
+import { PatternSummaryGrid } from './PatternSummaryGrid';
+import { SentimentTrendChart } from './SentimentTrendChart';
+import TacticalRadarChart from './TacticalRadarChart';
+
+interface AnalysisDisplayProps {
+    state: {
+        status: 'idle' | 'loading' | 'success' | 'error';
+        data: AnalysisResult | null;
+        error: string | null;
+    };
+}
+
+const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ state }) => {
+    const [showPrintModal, setShowPrintModal] = useState(false);
+    const [activePatternId, setActivePatternId] = useState<string | null>(null);
+    const [tooltipData, setTooltipData] = useState<{ x: number, y: number, text: string, name: string, severity: string } | null>(null);
+    const [isFullScreen, setIsFullScreen] = useState(false);
+    const [isMobile, setIsMobile] = useState(false);
+    
+    const patternRefs = useRef<Record<string, HTMLDivElement | null>>({});
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Detect mobile for tooltip behavior
+    useEffect(() => {
+        const checkMobile = () => setIsMobile(window.innerWidth < 768);
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
+    // Save summary logic
+    const saveSummary = useCallback((data: AnalysisResult) => {
+        const summary = `
+# Zusammenfassung: ${new Date().toLocaleString()}
+
+## Analyse
+${data.zusammenfassung}
+
+## Ergebnisse
+- Score: ${data.score}
+- Muster gefunden: ${data.erkannte_muster.length}
+
+## Handlungsplan
+${data.handlungsplan.fazit}
+`;
+        const blob = new Blob([summary], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Zusammenfassung_${new Date().toISOString()}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }, []);
+
+    useEffect(() => {
+        if (state.status === 'success' && state.data) {
+            // Option: Automatic save or just enabled button.
+            // Let's just make it easy for user to click button.
+        }
+    }, [state.status, state.data, saveSummary]);
+
+
+    const toggleFullScreen = useCallback(() => {
+        if (!containerRef.current) return;
+        if (!document.fullscreenElement) {
+            containerRef.current.requestFullscreen().then(() => setIsFullScreen(true)).catch(console.error);
+        } else {
+            document.exitFullscreen().then(() => setIsFullScreen(false)).catch(console.error);
+        }
+    }, []);
+
+    useEffect(() => {
+        const handleFsChange = () => setIsFullScreen(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', handleFsChange);
+        return () => document.removeEventListener('fullscreenchange', handleFsChange);
+    }, []);
+
+    const scrollToPattern = useCallback((id: string) => {
+        setActivePatternId(id);
+        const target = patternRefs.current[id];
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.classList.add('ring-4', 'ring-brand-primary/40', 'duration-500', 'scale-[1.02]');
+            setTimeout(() => target.classList.remove('ring-4', 'ring-brand-primary/40', 'scale-[1.02]'), 2000);
+        }
+    }, []);
+
+    const handleInteraction = (e: React.MouseEvent | React.TouchEvent, pattern: any) => {
+        // Prevent default only if necessary to stop scrolling/selection conflicts
+        // e.preventDefault(); 
+        
+        let clientX, clientY;
+        if ('touches' in e) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = (e as React.MouseEvent).clientX;
+            clientY = (e as React.MouseEvent).clientY;
+        }
+
+        setTooltipData({
+            x: clientX + 10,
+            y: clientY + 10,
+            text: pattern.erklaerung,
+            name: pattern.muster_name,
+            severity: pattern.schweregrad
+        });
+        setActivePatternId(pattern.id);
+    };
+
+    const radarData = useMemo(() => {
+        if (!state.data) return [];
+        const f = state.data.linguistischer_fingerabdruck;
+        return [
+            { subject: 'Validierung', A: f.emotionale_validierung, fullMark: 100 },
+            { subject: 'Transparenz', A: Math.max(0, 100 - state.data.score), fullMark: 100 },
+            { subject: 'Empathie', A: f.emotionale_validierung * 0.8, fullMark: 100 },
+            { subject: 'Klarheit', A: 100 - (state.data.erkannte_muster.length * 10), fullMark: 100 },
+            { subject: 'Objektivität', A: 50 + (f.emotionale_validierung / 2), fullMark: 100 },
+        ];
+    }, [state.data]);
+
+    const highlightedText = useMemo(() => {
+        if (!state.data) return null;
+        const text = state.data.original_text;
+        const patterns = [...state.data.erkannte_muster]
+            .filter(p => p.startIndex !== undefined)
+            .sort((a, b) => a.startIndex! - b.startIndex!);
+        
+        const parts: React.ReactNode[] = [];
+        let lastIdx = 0;
+
+        patterns.forEach((p) => {
+            const start = p.startIndex!;
+            const end = p.endIndex!;
+            if (start < lastIdx) return;
+            
+            if (start > lastIdx) parts.push(text.substring(lastIdx, start));
+            
+            const isCritical = p.schweregrad === 'hoch' || p.schweregrad === 'kritisch';
+            parts.push(
+                <span 
+                    key={`hl-${p.id}`} 
+                    onMouseEnter={(e) => !isMobile && handleInteraction(e, p)}
+                    onMouseMove={(e) => !isMobile && handleInteraction(e, p)}
+                    onMouseLeave={() => { if(!isMobile) { setTooltipData(null); setActivePatternId(null); }}}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        // Mobile: Toggle Tooltip on click, Desktop: Scroll
+                        if (isMobile) {
+                             if (activePatternId === p.id) {
+                                 // Second tap scrolls to detail
+                                 scrollToPattern(p.id);
+                                 setTooltipData(null);
+                             } else {
+                                 // First tap shows tooltip
+                                 handleInteraction(e, p);
+                             }
+                        } else {
+                            scrollToPattern(p.id);
+                        }
+                    }}
+                    className={`
+                        ${isCritical ? 'highlight-critical' : 'highlight-warning'} 
+                        ${activePatternId === p.id ? 'highlight-active' : ''} 
+                        cursor-pointer px-1 py-0.5 rounded transition-all duration-300 select-none
+                    `}
+                >
+                    {text.substring(start, end)}
+                </span>
+            );
+            lastIdx = end;
+        });
+        
+        if (lastIdx < text.length) parts.push(text.substring(lastIdx));
+        return parts;
+    }, [state.data, activePatternId, scrollToPattern, isMobile]);
+
+    if (state.status === 'loading') return (
+        <div className="flex flex-col items-center justify-center py-48 forensic-panel rounded-[3rem] md:rounded-[5rem] animate-fade-in relative overflow-hidden">
+            <div className="absolute inset-0 bg-brand-primary/[0.02] animate-pulse"></div>
+            <div className="absolute inset-0 terminal-grid opacity-10"></div>
+            <div className="relative mb-16">
+                <div className="w-32 h-32 md:w-40 md:h-40 border-[3px] border-slate-800 border-t-brand-primary rounded-full animate-spin shadow-[0_0_100px_rgba(14,165,233,0.2)]"></div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-16 h-16 md:w-20 md:h-20 bg-brand-primary/10 rounded-full animate-ping opacity-20"></div>
+                </div>
+            </div>
+            <div className="text-center space-y-8 px-6 relative z-10">
+                <h3 className="text-lg md:text-2xl font-black text-white uppercase tracking-[1.2em] font-mono animate-terminal-blink">Omega_Scan_Active</h3>
+                <div className="flex flex-col items-center gap-4">
+                    <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest italic">Interrogating linguistic payload...</p>
+                    <div className="h-0.5 bg-slate-900 rounded-full overflow-hidden w-48 md:w-96 border border-slate-800">
+                        <div className="h-full bg-brand-primary animate-scan shadow-[0_0_25px_rgba(14,165,233,1)]"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    if (state.status === 'error') return (
+        <Card className="border-brand-accent/40 bg-brand-accent/[0.03] p-8 md:p-24 text-center rounded-[3rem] md:rounded-[4rem] animate-shake">
+            <h3 className="text-2xl md:text-4xl font-black text-white mb-6 font-display uppercase tracking-tight">System Leak Detected</h3>
+            <p className="text-slate-500 text-sm md:text-lg mb-12 font-mono italic max-w-xl mx-auto leading-relaxed border-l-2 border-brand-accent/20 pl-8 italic">
+                {state.error || "Unerwartete Protokoll-Unterbrechung"}
+            </p>
+            <Button variant="danger" onClick={() => window.location.reload()} className="!rounded-full !px-12 md:!px-20 !py-6 md:!py-8 !text-xs uppercase tracking-[0.5em] font-black">Emergency Reset</Button>
+        </Card>
+    );
+
+    if (!state.data) return null;
+    const res = state.data;
+
+    return (
+        <div 
+            ref={containerRef}
+            className={`space-y-16 md:space-y-32 animate-fade-in ${isFullScreen ? 'fixed inset-0 z-[100] bg-slate-950 p-6 md:p-12 overflow-y-auto crt-effect' : 'pb-24 md:pb-64'}`}
+        >
+            {/* Primary Analysis HUB */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+                <Card className="lg:col-span-5 p-4 sm:p-10 md:p-20 rounded-[2rem] sm:rounded-[3rem] md:rounded-[4rem] bg-[#070e1a] border-slate-800 shadow-4xl flex flex-col items-center justify-center relative overflow-hidden group">
+                    <div className="absolute top-0 left-0 w-full h-full terminal-grid opacity-5"></div>
+                    <ScoreGauge score={res.score} />
+                    <div className="mt-16 text-center">
+                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-[1em] font-mono mb-4 block">Risk Assessment</span>
+                        <div className={`px-12 md:px-16 py-4 rounded-full border-2 text-[10px] md:text-[12px] font-black tracking-[0.6em] font-mono shadow-2xl transition-all duration-1000 ${res.score > 70 ? 'bg-brand-accent/5 text-brand-accent border-brand-accent/20' : 'bg-brand-clinical/5 text-brand-clinical border-brand-clinical/20'}`}>
+                            {res.score > 70 ? 'CRITICAL_THREAT' : 'STABLE_PROTOCOL'}
+                        </div>
+                    </div>
+                </Card>
+
+                <Card className="lg:col-span-7 p-4 sm:p-10 md:p-20 rounded-[2rem] sm:rounded-[3rem] md:rounded-[4rem] bg-[#070e1a]/95 border-slate-800 shadow-4xl relative overflow-hidden flex flex-col justify-between">
+                    <div className="space-y-12">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-[12px] md:text-[14px] font-black text-brand-primary uppercase tracking-[0.5em] md:tracking-[1em] font-mono flex items-center gap-6">
+                                <span className="w-1.5 h-1.5 bg-brand-primary rounded-full animate-ping"></span>
+                                Executive Dossier
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[8px] font-mono text-slate-700 bg-slate-950 px-3 py-1 rounded-md border border-slate-800 hidden sm:inline-block">SIG_TYPE: OMEGA_SYNTH</span>
+                                <button 
+                                    onClick={() => saveSummary(res)}
+                                    className="text-[8px] font-mono text-brand-primary border border-brand-primary px-3 py-1 rounded-md hover:bg-brand-primary hover:text-white transition-colors uppercase"
+                                >
+                                    SAVE_MD
+                                </button>
+                            </div>
+                        </div>
+                        <p className="text-white text-2xl md:text-5xl font-display font-bold leading-[1.15] tracking-tight italic decoration-brand-primary/10 decoration-[8px] md:decoration-[12px] underline-offset-[-6px] md:underline-offset-[-10px] underline">
+                            {res.zusammenfassung}
+                        </p>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-12 pt-16 border-t border-slate-800/50 mt-16">
+                        <div className="space-y-6">
+                            <h4 className="text-[10px] font-black text-slate-600 uppercase tracking-[0.5em] font-mono">Linguistic Radar</h4>
+                            <div className="h-48">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+                                        <PolarGrid stroke="#1e293b" />
+                                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#475569', fontSize: 8, fontFamily: 'JetBrains Mono' }} />
+                                        <Radar name="OMEGA" dataKey="A" stroke="#0ea5e9" fill="#0ea5e9" fillOpacity={0.3} />
+                                    </RadarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                        <div className="space-y-6">
+                            <h4 className="text-[10px] font-black text-slate-600 uppercase tracking-[0.5em] font-mono">Fingerprint Analysis</h4>
+                            <FingerprintDisplay fingerprint={res.linguistischer_fingerabdruck} />
+                        </div>
+                        <div className="space-y-6">
+                            <h4 className="text-[10px] font-black text-slate-600 uppercase tracking-[0.5em] font-mono">Sentiment Trend</h4>
+                            {res.sentiment_evolution ? (
+                                <SentimentTrendChart data={res.sentiment_evolution} />
+                            ) : (
+                                <div className="text-[10px] font-mono text-slate-700 italic">Keine Verlaufsdaten verfügbar</div>
+                            )}
+                        </div>
+                    </div>
+                </Card>
+            </div>
+
+            {/* Tactics Radar Profile */}
+            <div className="space-y-12">
+                <TacticalRadarChart 
+                    patterns={res.erkannte_muster} 
+                    onLocatePattern={scrollToPattern} 
+                />
+            </div>
+
+            {/* Methodik & Herleitung Section */}
+            <div className="space-y-12">
+                <div className="flex items-center gap-6 md:gap-10 px-4 md:px-8">
+                    <h3 className="text-[11px] md:text-[13px] font-black text-slate-700 uppercase tracking-[1em] md:tracking-[2em] font-mono whitespace-nowrap">Methodischer_Prüfpfad</h3>
+                    <div className="h-[1px] w-full bg-slate-900 shadow-inner"></div>
+                </div>
+                
+                <Card className="p-6 md:p-16 rounded-[2.5rem] bg-[#070e1a]/85 border-slate-800 shadow-3xl relative overflow-hidden">
+                    <div className="absolute inset-0 terminal-grid opacity-[0.03] pointer-events-none"></div>
+                    <div className="absolute top-0 right-0 w-96 h-96 bg-brand-primary/5 rounded-full blur-[100px] pointer-events-none"></div>
+                    
+                    <div className="relative z-10 flex flex-col gap-12">
+                        {/* Section Header */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-900 pb-8">
+                            <div className="flex items-center gap-4">
+                                <span className="p-4 bg-brand-primary/10 rounded-2xl text-brand-primary shadow-[0_0_20px_rgba(14,165,233,0.1)]">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                    </svg>
+                                </span>
+                                <div>
+                                    <h3 className="text-xl md:text-3xl font-black text-white font-display tracking-tight">Gutachterliche Herleitung der Ergebnisse</h3>
+                                    <p className="text-[10px] text-brand-primary font-mono tracking-widest uppercase mt-1">Strikte wissenschaftliche & neutrale Auswertungsmethodik | FamCOMM-Eval v5.2</p>
+                                </div>
+                            </div>
+                            <div className="shrink-0 flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2.5 rounded-2xl">
+                                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-ping"></div>
+                                <span className="text-[10px] font-mono text-emerald-400 font-bold tracking-wider uppercase">Neutralitätsprüfung bestanden</span>
+                            </div>
+                        </div>
+
+                        {/* Workflow / Process Steps */}
+                        <div className="bg-slate-950/40 border border-slate-900/60 rounded-3xl p-6 md:p-8">
+                            <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest font-mono mb-6">Wissenschaftliche Auswertungsschritte:</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 relative">
+                                {(res.methodische_herleitung?.verfahrensschritte || [
+                                    "1. Lexiko-syntaktischer Primärscan",
+                                    "2. Kriteriengeleitete Musterüberprüfung",
+                                    "3. Entlastungsprüfung (Modus-Gegenprobe)",
+                                    "4. Konfliktgrad-Quantifizierung",
+                                    "5. Formulierung der BIFF-Intervention"
+                                ]).map((schritt, idx) => (
+                                    <div key={idx} className="relative group bg-slate-900/30 border border-slate-800/40 hover:border-brand-primary/40 p-4 rounded-2xl transition-all duration-300">
+                                        <div className="absolute top-3 right-3 text-[9px] font-mono text-slate-600 font-bold">0{idx + 1}</div>
+                                        <div className="w-2 h-2 bg-brand-primary opacity-60 rounded-full mb-3 group-hover:scale-125 group-hover:bg-brand-primary transition-all"></div>
+                                        <p className="text-xs font-mono text-slate-300 leading-normal font-medium">{schritt}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Main Grid: Methodology Left, Evaluation Logic Right */}
+                        <div className="grid grid-col-1 xl:grid-cols-12 gap-8 md:gap-12 items-stretch">
+                            <div className="xl:col-span-7 space-y-8 flex flex-col justify-between">
+                                <div className="space-y-6">
+                                    <p className="text-slate-300 text-sm md:text-base leading-relaxed">
+                                        Jede Bewertung beruht auf einem transparenten, psychologisch fundierten Inhaltsanalyseverfahren. Die gutachterliche Auswertungslogik stellt sicher, dass Bewertungen unbeeinflusst von emotionaler Voreingenommenheit und auf Grundlage linguistischer Evidenz erfolgen.
+                                    </p>
+
+                                    <div className="space-y-4">
+                                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">1. Wissenschaftliches Auswertungsverfahren:</h4>
+                                        <p className="text-slate-300 text-xs sm:text-sm leading-relaxed pl-4 border-l-2 border-brand-primary/30">
+                                            {res.methodische_herleitung?.analyse_verfahren || "Qualitativ-forensische Inhaltsanalyse nach psychologischen Standards. Auswertung syntaktischer Druckmittel, semantischer Verschleierungstechniken sowie dysfunktionaler interpersoneller Kontrollbestrebungen."}
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">2. Gewährleistung von Sachlichkeit & Neutralität:</h4>
+                                        <p className="text-slate-300 text-xs sm:text-sm leading-relaxed pl-4 border-l-2 border-brand-primary/30">
+                                            {res.methodische_herleitung?.sachlichkeits_garantie || "Das Verfahren schließt haltlose Zuschreibungen oder unbewiesene Persönlichkeitsdiagnosen aktiv aus. Klassifizierungen werden ausschließlich durch unmittelbar korrelierende, wörtliche Zitate belegt und neutral interpretiert."}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Exculpatory context check */}
+                                <div className="p-6 bg-slate-900/10 border border-slate-900 rounded-3xl space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-brand-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">Entlastungsanalyse & kooperative Faktoren:</h4>
+                                    </div>
+                                    <p className="text-slate-300 text-xs leading-relaxed italic">
+                                        {res.methodische_herleitung?.entlastende_faktoren || "Ein systematischer Modusscan lieferte keine Anzeichen deeskalierender oder aufrichtig kooperativer Textpassagen im Input. Der Kommunikationsduktus verbleibt über die gesamte Länge im konfrontativ-fordernden Bereich."}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="xl:col-span-5 flex flex-col justify-between space-y-8 bg-slate-950/40 border-2 border-slate-900 rounded-[2rem] p-6 md:p-10">
+                                <div>
+                                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest font-mono mb-4">Geprüfte Kriterien</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {(res.methodische_herleitung?.kriterien_anwendung || [
+                                            "Linguistische Bindungsfürsorge",
+                                            "Kooperationsbereitschaft im Sorgekontext",
+                                            "DARVO-Muster (Schuldumkehr)",
+                                            "Perspektivenübernahme & Elternbündnis",
+                                            "Subtextuelle Schuldzuweisung"
+                                        ]).map((kriterium, i) => (
+                                            <span key={i} className="text-[10px] md:text-[11px] font-mono text-brand-primary bg-brand-primary/5 border border-brand-primary/10 px-3 py-1.5 rounded-full">
+                                                ✔ {kriterium}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4 pt-4 border-t border-slate-900">
+                                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest font-mono">Objektive Logik der Bewertung</h4>
+                                    <p className="text-slate-400 text-xs leading-relaxed font-sans italic">
+                                        {res.methodische_herleitung?.objektive_logik || "Der Gesamt-Konfliktgrad quantifiziert den Grad der Kooperationsblockade und Eskalationsdynamik. Er wird berechnet auf Basis der Belegdichte verifizierter, destruktiver Interaktionsmuster relativ zur Gesamtlänge der Kommunikation."}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </Card>
+            </div>
+
+            {/* Pattern Threat Matrix Grid */}
+            <div className="space-y-12">
+                <div className="flex items-center gap-6 md:gap-10 px-4 md:px-8">
+                    <h3 className="text-[11px] md:text-[13px] font-black text-slate-700 uppercase tracking-[1em] md:tracking-[2em] font-mono whitespace-nowrap">Bedrohungs_Matrix</h3>
+                    <div className="h-[1px] w-full bg-slate-900 shadow-inner"></div>
+                </div>
+                <PatternSummaryGrid 
+                    patterns={res.erkannte_muster}
+                    activePatternId={activePatternId}
+                    onSelectPattern={setActivePatternId}
+                    onLocatePattern={scrollToPattern}
+                />
+            </div>
+
+            {/* Forensic Visualization (The Mirror) */}
+            <div className="space-y-12">
+                 <div className="flex items-center gap-6 md:gap-10 px-4 md:px-8">
+                    <h3 className="text-[11px] md:text-[13px] font-black text-slate-700 uppercase tracking-[1em] md:tracking-[2em] font-mono whitespace-nowrap overflow-hidden text-ellipsis">Forensic_Mirror</h3>
+                    <div className="h-[1px] w-full bg-slate-900 shadow-inner"></div>
+                </div>
+                <Card className={`scanline-container p-4 sm:p-12 md:p-24 rounded-2xl sm:rounded-[3rem] md:rounded-[5rem] border-slate-800 bg-[#03070d] shadow-2xl relative overflow-hidden`}>
+                    <div className="absolute inset-0 terminal-grid opacity-5 pointer-events-none"></div>
+                    <div className="flex flex-col lg:flex-row justify-between items-start mb-12 md:mb-20 gap-8 relative z-10">
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-4 md:gap-6">
+                                <div className="w-3 h-3 md:w-4 md:h-4 bg-brand-primary rounded-full animate-glow-pulse shadow-[0_0_20px_rgba(14,165,233,1)]"></div>
+                                <h3 className="text-lg md:text-2xl font-black text-brand-primary uppercase tracking-[1em] md:tracking-[1.5em] font-mono">Evidence</h3>
+                            </div>
+                            <p className="text-[9px] text-slate-600 uppercase tracking-[0.2em] md:tracking-[0.4em] font-bold italic pl-8 md:pl-10">Deconstructing Subtextual Manipulation</p>
+                        </div>
+                        <div className="flex gap-4 w-full lg:w-auto">
+                            <button onClick={toggleFullScreen} className="flex-1 lg:flex-none p-4 md:p-6 bg-slate-900/40 border border-slate-800 text-slate-500 rounded-[1.5rem] md:rounded-[2rem] hover:text-brand-primary hover:border-brand-primary/40 transition-all shadow-xl backdrop-blur-md active:scale-95">
+                                {isFullScreen ? <ShrinkIcon className="w-5 h-5 md:w-6 md:h-6" /> : <ExpandIcon className="w-5 h-5 md:w-6 md:h-6" />}
+                            </button>
+                            <Button variant="secondary" onClick={() => setShowPrintModal(true)} className="flex-1 lg:flex-none !rounded-[1.5rem] md:!rounded-[2rem] !px-8 md:!px-12 !py-4 md:!py-6 !text-[10px] !bg-slate-900/40 !border-slate-800 !text-slate-400 hover:!text-white shadow-xl !tracking-[0.2em] md:!tracking-[0.4em]">
+                                <DownloadIcon className="w-4 h-4 md:w-5 md:h-5 mr-4" /> EXPORT
+                            </Button>
+                        </div>
+                    </div>
+                    <div className="forensic-mirror text-slate-300 text-base md:text-3xl font-mono whitespace-pre-wrap p-4 sm:p-10 md:p-20 border border-slate-900/60 rounded-xl sm:rounded-[2.5rem] md:rounded-[4rem] bg-slate-950/60 leading-[1.8] md:leading-[2.6] antialiased relative z-10 shadow-[inset_0_0_80px_rgba(0,0,0,0.8)] overflow-hidden min-h-[300px] md:min-h-[500px]">
+                        <div className="absolute top-0 left-0 w-full h-full bg-brand-primary/[0.005] pointer-events-none"></div>
+                        {highlightedText}
+                    </div>
+                </Card>
+            </div>
+
+            {/* Tactical Interventions Section */}
+            <div className="space-y-16">
+                <div className="flex items-center gap-10 px-8">
+                    <h3 className="text-[11px] md:text-[13px] font-black text-slate-700 uppercase tracking-[1em] md:tracking-[2em] font-mono whitespace-nowrap">Interventions</h3>
+                    <div className="h-[1px] w-full bg-slate-900 shadow-inner"></div>
+                </div>
+                <HandlungsplanDisplay plan={res.handlungsplan} />
+            </div>
+
+            {/* Detailed Dossiers Section */}
+            <div className="space-y-16">
+                <div className="flex items-center gap-10 px-8">
+                    <h3 className="text-[11px] md:text-[13px] font-black text-slate-700 uppercase tracking-[1em] md:tracking-[2em] font-mono whitespace-nowrap">Dossiers</h3>
+                    <div className="h-[1px] w-full bg-slate-900 shadow-inner"></div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 md:gap-12">
+                    {res.erkannte_muster.map((m) => (
+                        <div 
+                            key={m.id} 
+                            id={`pattern-dossier-${m.id}`}
+                            ref={el => { patternRefs.current[m.id] = el; }}
+                            onMouseEnter={() => !isMobile && setActivePatternId(m.id)}
+                            onMouseLeave={() => !isMobile && setActivePatternId(null)}
+                            className={`transition-all duration-1000 ${activePatternId === m.id ? 'scale-[1.03] z-10' : ''}`}
+                        >
+                            <PatternCard pattern={m} isActive={activePatternId === m.id} />
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Tactical HUD Tooltip - Adaptive for Mobile/Desktop */}
+            {tooltipData && (
+                <div 
+                    className={`
+                        forensic-panel border-2 border-brand-primary/50 shadow-[0_0_80px_rgba(14,165,233,0.3)] animate-fade-in backdrop-blur-3xl overflow-hidden
+                        ${isMobile 
+                            ? 'fixed bottom-4 left-4 right-4 z-[1000] rounded-3xl p-6 mb-[env(safe-area-inset-bottom,20px)]' 
+                            : 'fixed pointer-events-none z-[1000] p-8 rounded-[2.5rem] max-w-[340px]'
+                        }
+                    `}
+                    style={!isMobile ? { 
+                        left: Math.min(tooltipData.x, window.innerWidth - 380), 
+                        top: Math.max(20, Math.min(tooltipData.y, window.innerHeight - 300)) 
+                    } : {}}
+                    onClick={() => isMobile && setTooltipData(null)}
+                >
+                    <div className="absolute top-0 left-0 w-full h-1 bg-brand-primary animate-scan opacity-50"></div>
+                    <div className="flex items-center justify-between mb-4 md:mb-6">
+                        <div className="flex items-center gap-3">
+                            <InfoIcon className="w-5 h-5 text-brand-primary" />
+                            <span className="text-[9px] font-black text-brand-primary uppercase tracking-[0.3em] font-mono">Omega_ID_Verify</span>
+                        </div>
+                        <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase tracking-widest font-mono ${tooltipData.severity === 'hoch' || tooltipData.severity === 'kritisch' ? 'text-brand-accent bg-brand-accent/10 border border-brand-accent/20' : 'text-brand-warning bg-brand-warning/10 border border-brand-warning/20'}`}>
+                            {tooltipData.severity}
+                        </span>
+                    </div>
+                    <h4 className="text-xl md:text-2xl font-bold text-white mb-2 md:mb-3 tracking-tight font-display">{tooltipData.name}</h4>
+                    <p className="text-[12px] md:text-[14px] text-slate-300 font-mono leading-relaxed italic opacity-90">
+                        {tooltipData.text}
+                    </p>
+                    <div className="mt-4 md:mt-8 pt-4 border-t border-slate-800 flex items-center justify-between">
+                         <span className="text-[8px] font-mono text-slate-600 uppercase tracking-widest">{isMobile ? 'TAP_AGAIN_FOR_DETAIL' : 'TAP_TO_LOCATE_DOSSIER'}</span>
+                         <div className="flex gap-1">
+                            {[1,2,3].map(i => <div key={i} className="w-1 h-1 bg-brand-primary/40 rounded-full"></div>)}
+                         </div>
+                    </div>
+                </div>
+            )}
+
+            {showPrintModal && <PrintPreviewModal result={res} onClose={() => setShowPrintModal(false)} />}
+        </div>
+    );
+};
+
+export default AnalysisDisplay;
