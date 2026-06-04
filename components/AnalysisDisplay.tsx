@@ -8,7 +8,7 @@ import FingerprintDisplay from './FingerprintDisplay';
 import PatternDistributionChart from './PatternDistributionChart';
 import HandlungsplanDisplay from './HandlungsplanDisplay';
 import { generateForensicPdf } from '../utils/pdfGenerator';
-import { exportJson } from '../utils/exportUtils';
+import { exportJson, exportCsv } from '../utils/exportUtils';
 import { DownloadIcon, ExpandIcon, ShrinkIcon, InfoIcon, FileIcon } from './ui/Icons';
 import PrintPreviewModal from './PrintPreviewModal';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts';
@@ -271,6 +271,12 @@ ${data.handlungsplan.fazit}
                                     className="text-[8px] font-mono text-brand-warning border border-brand-warning px-3 py-1 rounded-md hover:bg-brand-warning hover:text-white transition-colors uppercase"
                                 >
                                     JSON_EXPORT
+                                </button>
+                                <button 
+                                    onClick={() => exportCsv(res, `Analyse_${new Date().toISOString()}`)}
+                                    className="text-[8px] font-mono text-emerald-500 border border-emerald-500 px-3 py-1 rounded-md hover:bg-emerald-500 hover:text-white transition-colors uppercase"
+                                >
+                                    CSV_EXPORT
                                 </button>
                             </div>
                         </div>

@@ -2,6 +2,7 @@
 import React from 'react';
 import Card from './ui/Card';
 import { AppSettings } from '../types';
+import { t, Language } from '../utils/i18n';
 
 interface SettingsPageProps {
     settings: AppSettings;
@@ -122,6 +123,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ settings, onSettingsChange 
                             />
                         </button>
                     </div>
+                </div>
+
+                {/* Language Selection */}
+                <div className="space-y-4">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] font-mono block">{t('language', settings.language)}</label>
+                    <select 
+                        value={settings.language}
+                        onChange={(e) => handleChange('language', e.target.value as Language)}
+                        className="w-full bg-slate-900 border-2 border-slate-700 text-white rounded-2xl p-4 font-bold uppercase tracking-widest text-xs focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
+                    >
+                        <option value="de">{t('german', settings.language)}</option>
+                        <option value="ru">{t('russian', settings.language)}</option>
+                    </select>
                 </div>
 
                 {/* Court Mode Standard */}

@@ -28,6 +28,7 @@ export interface AppSettings {
     enableCrtEffect: boolean;
     courtMode: boolean;
     maskSensitiveData: boolean;
+    language: 'de' | 'ru';
 }
 
 export interface MethodischeHerleitung {

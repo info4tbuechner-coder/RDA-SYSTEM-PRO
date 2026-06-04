@@ -127,7 +127,7 @@ const cleanJsonResponse = (text: string): string => {
     return text.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
 };
 
-export const analyzeConversation = async (conversation: string, context: string, detailLevel: string = 'standard', courtMode: boolean = true): Promise<AnalysisResult> => {
+export const analyzeConversation = async (conversation: string, context: string, detailLevel: string = 'standard', courtMode: boolean = true, language: 'de' | 'ru' = 'de'): Promise<AnalysisResult> => {
     const ai = new GoogleGenAI({ 
         apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || '',
         httpOptions: {
@@ -137,9 +137,12 @@ export const analyzeConversation = async (conversation: string, context: string,
         }
     });
     
+    const languageInstruction = language === 'ru' ? "ANTWORTE DURCHGEHEND AUF RUSSISCH (RUSSIAN LANGUAGE)." : "Antworte auf Deutsch (German language).";
+
     const prompt = courtMode 
         ? `GUTACHTERLICHE KOMMUNIKATIONSEVALUATION
 ANALYSESTANDARD: FAMILIENGERICHTLICHES BEWERTUNGSVERFAHREN
+${languageInstruction}
 KONTEXT DER ELTERNLICHEN INTERAKTION: ${context}
 TRANSKRIPT / PROXIMALER KOMMUNIKATIONS-STREAM:
 """
@@ -147,6 +150,7 @@ ${conversation}
 """
 AUFTRAG: Führe ein wissenschaftlich-psychologisches Kommunikationsgutachten auf Basis des übermittelten Gesprächsmaterials durch. Halte dich an den neutralen, sachlichen Stil ohne polemische Begriffe.`
         : `FORENSIC_MISSION: DECONSTRUCT_PAYLOAD
+${languageInstruction}
 PRIORITY: MAX
 CONTEXT_DYNAMICS: ${context}
 RAW_STREAM:

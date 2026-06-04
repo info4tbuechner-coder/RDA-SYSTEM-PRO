@@ -24,17 +24,58 @@ interface ConversationInputProps {
     onAnalyze: (conversation: string, context: string) => void;
     isLoading: boolean;
     maxLength: number;
+    language: 'de' | 'ru';
 }
 
-const ConversationInput: React.FC<ConversationInputProps> = ({ onAnalyze, isLoading, maxLength }) => {
+const ConversationInput: React.FC<ConversationInputProps> = ({ onAnalyze, isLoading, maxLength, language }) => {
     const [conversation, setConversation] = useState('');
     const [context, setContext] = useState('');
     const [pendingPdf, setPendingPdf] = useState<File | null>(null);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [transcriptionStatus, setTranscriptionStatus] = useState('');
     const [isDragging, setIsDragging] = useState(false);
+    const [isDictating, setIsDictating] = useState(false);
+    const recognitionRef = useRef<any>(null);
     
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Toggle Dictation
+    const toggleDictation = () => {
+        if (isDictating) {
+            recognitionRef.current?.stop();
+            setIsDictating(false);
+            return;
+        }
+
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert('Web Speech API wird von diesem Browser nicht unterstützt.');
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = language === 'ru' ? 'ru-RU' : 'de-DE';
+
+        recognition.onresult = (event: any) => {
+            let transientTranscript = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                transientTranscript += event.results[i][0].transcript;
+            }
+            setConversation(prev => prev + ' ' + transientTranscript);
+        };
+        
+        recognition.onend = () => setIsDictating(false);
+        recognition.onerror = (event: any) => {
+            console.error('Dictation error:', event.error);
+            setIsDictating(false);
+        };
+
+        recognition.start();
+        recognitionRef.current = recognition;
+        setIsDictating(true);
+    };
 
     const {
         isRecording,
@@ -252,12 +293,23 @@ const ConversationInput: React.FC<ConversationInputProps> = ({ onAnalyze, isLoad
                         <div className="flex gap-2 md:gap-4">
                             {!isRecording && (
                                 <button 
+                                    onClick={toggleDictation}
+                                    className={`p-4 md:p-6 rounded-2xl md:rounded-[1.8rem] transition-all active:scale-95 flex items-center gap-2 font-mono text-[10px] font-bold uppercase ${isDictating ? 'bg-red-950 text-red-500 border-2 border-red-800' : 'bg-slate-950 text-slate-600 border-2 border-slate-800 hover:text-brand-accent hover:border-brand-accent/40'}`}
+                                    title="Diktiersprache starten"
+                                    aria-label="Diktiersprache starten"
+                                >
+                                    <Mic className={`w-5 h-5 md:w-6 md:h-6 ${isDictating ? 'text-red-500 animate-pulse' : 'text-brand-primary'}`} />
+                                    {isDictating ? 'STOP' : 'DIKTAT'}
+                                </button>
+                            )}
+                            {!isRecording && (
+                                <button 
                                     onClick={startRecording}
                                     className="p-4 md:p-6 bg-slate-950 text-slate-600 border-2 border-slate-800 hover:text-brand-accent hover:border-brand-accent/40 rounded-2xl md:rounded-[1.8rem] transition-all active:scale-95 flex items-center gap-2 font-mono text-[10px] font-bold uppercase"
                                     title="Sprachaufnahme starten"
                                     aria-label="Mikrofonaufnahme starten"
                                 >
-                                    <Mic className="w-5 h-5 md:w-6 md:h-6 text-brand-primary group-hover/input:animate-pulse" />
+                                    <FileAudio className="w-5 h-5 md:w-6 md:h-6 text-brand-primary group-hover/input:animate-pulse" />
                                     <span className="hidden sm:inline">REC</span>
                                 </button>
                             )}

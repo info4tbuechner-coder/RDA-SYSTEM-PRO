@@ -30,7 +30,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     detailLevel: 'standard',
     enableCrtEffect: true,
     courtMode: true,
-    maskSensitiveData: false
+    maskSensitiveData: false,
+    language: 'de'
 };
 
 const App: React.FC = () => {
@@ -104,7 +105,7 @@ const App: React.FC = () => {
         setAnalysisState({ status: 'loading', data: null, error: null });
         
         try {
-            const result = await analyzeConversation(conversation, context, settings.detailLevel, settings.courtMode);
+            const result = await analyzeConversation(conversation, context, settings.detailLevel, settings.courtMode, settings.language);
             const processedResult = settings.maskSensitiveData ? maskAnalysisData(result) : result;
             setAnalysisState({ status: 'success', data: processedResult, error: null });
             addAnalysis(processedResult);
@@ -162,6 +163,7 @@ const App: React.FC = () => {
                                     onAnalyze={handleAnalyze} 
                                     isLoading={analysisState.status === 'loading'} 
                                     maxLength={settings.maxProtocolLength} 
+                                    language={settings.language}
                                 />
                             </div>
                             <div className="xl:col-span-8 space-y-8 md:space-y-12">
