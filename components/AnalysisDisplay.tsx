@@ -94,7 +94,8 @@ ${data.handlungsplan.fazit}
         setActivePatternId(id);
         const target = patternRefs.current[id];
         if (target) {
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Mobile-aware scroll behavior
+            target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             target.classList.add('ring-4', 'ring-brand-primary/40', 'duration-500', 'scale-[1.02]');
             setTimeout(() => target.classList.remove('ring-4', 'ring-brand-primary/40', 'scale-[1.02]'), 2000);
         }

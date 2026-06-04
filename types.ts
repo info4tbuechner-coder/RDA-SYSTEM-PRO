@@ -27,6 +27,7 @@ export interface AppSettings {
     detailLevel: 'kompakt' | 'standard' | 'tiefgreifend';
     enableCrtEffect: boolean;
     courtMode: boolean;
+    maskSensitiveData: boolean;
 }
 
 export interface MethodischeHerleitung {

@@ -4,6 +4,7 @@ import { useSessionState } from '../hooks/useSessionState';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { useAnalysisHistory } from '../hooks/useAnalysisHistory';
 import { AnalysisResult, AppSettings } from '../types';
+import { maskAnalysisData } from '../utils/masking';
 
 import SplashScreen from './SplashScreen';
 import LoginScreen from './LoginScreen';
@@ -28,7 +29,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     toxicityThreshold: 70,
     detailLevel: 'standard',
     enableCrtEffect: true,
-    courtMode: true
+    courtMode: true,
+    maskSensitiveData: false
 };
 
 const App: React.FC = () => {
@@ -103,8 +105,9 @@ const App: React.FC = () => {
         
         try {
             const result = await analyzeConversation(conversation, context, settings.detailLevel, settings.courtMode);
-            setAnalysisState({ status: 'success', data: result, error: null });
-            addAnalysis(result);
+            const processedResult = settings.maskSensitiveData ? maskAnalysisData(result) : result;
+            setAnalysisState({ status: 'success', data: processedResult, error: null });
+            addAnalysis(processedResult);
             vibrate([20, 40, 20]);
         } catch (err: any) {
             console.error(err);

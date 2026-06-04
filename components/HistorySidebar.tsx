@@ -2,6 +2,7 @@
 import React, { useRef } from 'react';
 import { useAnalysisHistory } from '../hooks/useAnalysisHistory';
 import { AnalysisResult } from '../types';
+import { KeywordTrendDashboard } from './KeywordTrendDashboard';
 import { XIcon, TrashIcon, DownloadIcon, FileIcon, UploadIcon } from './ui/Icons';
 import Button from './ui/Button';
 import { encrypt, decrypt } from '../utils/crypto';
@@ -75,6 +76,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({ isOpen, onClose, onLoad
                     {history.length > 0 ? (
                         <>
                             <div className="flex-grow overflow-y-auto p-6 space-y-4">
+                                <KeywordTrendDashboard />
                                 {history.map((item) => (
                                     <div key={item.id} className="group p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50 hover:border-brand-primary/30 transition-all">
                                         <div className="flex justify-between items-start mb-3">

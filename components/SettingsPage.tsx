@@ -101,6 +101,29 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ settings, onSettingsChange 
                     </p>
                 </div>
 
+                {/* Mask Sensitive Data Toggle */}
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center bg-slate-950/40 border-2 border-slate-800 rounded-2xl p-6">
+                        <div className="space-y-1 pr-4">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] font-mono block">Automatisierte Anonymisierung</label>
+                            <p className="text-xs text-slate-500">Maskiert automatisch Namen und sensible Identifikatoren in allen generierten Berichten, Analyseergebnissen und der Historie. Diese Funktion schützt die Privatsphäre der beteiligten Parteien bei der Archivierung oder externen Weitergabe.</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => handleChange('maskSensitiveData', !settings.maskSensitiveData)}
+                            className={`w-14 h-8 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 shrink-0 ${
+                                settings.maskSensitiveData ? 'bg-brand-primary' : 'bg-slate-800'
+                            }`}
+                        >
+                            <div
+                                className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform duration-300 ${
+                                    settings.maskSensitiveData ? 'translate-x-6' : 'translate-x-0'
+                                }`}
+                            />
+                        </button>
+                    </div>
+                </div>
+
                 {/* Court Mode Standard */}
                 <div className="space-y-4">
                     <div className="flex justify-between items-center bg-slate-950/40 border-2 border-slate-800 rounded-2xl p-6">
